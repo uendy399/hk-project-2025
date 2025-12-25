@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MITM攻擊與防禦演示系統
+MITM攻擊演示系統
 主程式入口
 """
 
@@ -31,7 +31,7 @@ except ImportError as e:
 def main():
     """主函式"""
     print("=" * 60)
-    print("MITM攻擊與防禦演示系統")
+    print("MITM攻擊演示系統")
     print("=" * 60)
     print("注意: 此工具僅用於教育和研究目的")
     print("請確保在合法授權的環境中使用")

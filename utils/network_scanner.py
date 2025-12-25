@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-网络扫描工具模块
-用于扫描局域网中的设备
+網路掃描工具模組
+用於掃描區域網路中的裝置
 """
 
 import socket
@@ -25,20 +25,20 @@ class NetworkScanner:
     
     def scan_network(self, network_range):
         """
-        扫描指定网络范围内的活动主机
+        掃描指定網路範圍內的活動主機
         
         Args:
-            network_range: 网络范围，例如 '192.168.1.0/24'
+            network_range: 網路範圍，例如 '192.168.1.0/24'
         
         Returns:
-            list: 活动主机列表
+            list: 活動主機列表
         """
         if not NMAP_AVAILABLE or self.nm is None:
-            # 如果nmap不可用，使用scapy进行ARP扫描
+            # 如果nmap不可用，使用scapy進行ARP掃描
             return self._scan_with_scapy(network_range)
         
         try:
-            # 使用nmap扫描
+            # 使用nmap掃描
             self.nm.scan(hosts=network_range, arguments='-sn')
             hosts = []
             
@@ -54,17 +54,17 @@ class NetworkScanner:
             
             return hosts
         except Exception as e:
-            print(f"扫描错误: {e}")
-            # 如果nmap扫描失败，回退到scapy
+            print(f"掃描錯誤: {e}")
+            # 如果nmap掃描失敗，回退到scapy
             return self._scan_with_scapy(network_range)
     
     def _scan_with_scapy(self, network_range):
-        """使用scapy进行网络扫描（nmap不可用时的备用方案）"""
+        """使用scapy進行網路掃描（nmap不可用時的備用方案）"""
         try:
             network = ipaddress.ip_network(network_range, strict=False)
             hosts = []
             
-            # 使用ARP请求扫描
+            # 使用ARP請求掃描
             arp_request = ARP(pdst=str(network_range))
             broadcast = Ether(dst="ff:ff:ff:ff:ff:ff")
             arp_request_broadcast = broadcast / arp_request
@@ -87,11 +87,11 @@ class NetworkScanner:
             
             return hosts
         except Exception as e:
-            print(f"扫描错误: {e}")
+            print(f"掃描錯誤: {e}")
             return []
     
     def _get_mac(self, ip):
-        """获取IP地址对应的MAC地址"""
+        """獲取IP位址對應的MAC位址"""
         try:
             arp_request = ARP(pdst=ip)
             broadcast = Ether(dst="ff:ff:ff:ff:ff:ff")
@@ -105,9 +105,9 @@ class NetworkScanner:
             return "Unknown"
     
     def get_gateway(self):
-        """获取默认网关"""
+        """獲取預設閘道"""
         try:
-            # 读取路由表获取网关
+            # 讀取路由表獲取閘道
             import subprocess
             result = subprocess.run(['ip', 'route', 'show', 'default'], 
                                   capture_output=True, text=True)
@@ -118,7 +118,7 @@ class NetworkScanner:
                     gateway_mac = self._get_mac(gateway_ip)
                     return {'ip': gateway_ip, 'mac': gateway_mac}
         except Exception as e:
-            print(f"获取网关错误: {e}")
+            print(f"獲取閘道錯誤: {e}")
         return None
 
 

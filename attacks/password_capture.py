@@ -62,35 +62,35 @@ class PasswordCapture:
                     
                     tcp_streams[stream_id] += load
                     
-                            # 檢查是否包含完整的HTTP請求
-                            try:
-                                full_data = tcp_streams[stream_id].decode('utf-8', errors='ignore')
-                                
-                                # 檢查是否包含HTTP請求結束標記或流太長
-                                if '\r\n\r\n' in full_data or len(tcp_streams[stream_id]) > 4096:
-                                    # 調試輸出
-                                    if 'POST' in full_data:
-                                        print(f"[DEBUG] 檢測到POST請求 (長度: {len(full_data)})")
-                                        if 'password' in full_data.lower() or 'login' in full_data.lower():
-                                            print(f"[DEBUG] POST請求包含登入相關欄位")
-                                    
-                                    # 檢測HTTP POST請求中的密碼
-                                    if 'POST' in full_data and ('password' in full_data.lower() or 'passwd' in full_data.lower() or 'login' in full_data.lower()):
-                                        print(f"[+] 嘗試提取HTTP憑證...")
-                                        self._extract_http_credentials(full_data, packet)
-                                    
-                                    # 檢測FTP密碼
-                                    if ('USER' in full_data or 'PASS' in full_data) and ('220' in full_data or '331' in full_data or '230' in full_data):
-                                        print(f"[+] 嘗試提取FTP憑證...")
-                                        self._extract_ftp_credentials(full_data, packet)
-                                    
-                                    # 檢測其他協定的憑證
-                                    self._extract_generic_credentials(full_data, packet)
-                                    
-                                    # 清理已處理的流
-                                    if len(tcp_streams) > 100:
-                                        oldest = min(tcp_streams.keys(), key=lambda k: len(tcp_streams[k]))
-                                        del tcp_streams[oldest]
+                    # 檢查是否包含完整的HTTP請求
+                    try:
+                        full_data = tcp_streams[stream_id].decode('utf-8', errors='ignore')
+                        
+                        # 檢查是否包含HTTP請求結束標記或流太長
+                        if '\r\n\r\n' in full_data or len(tcp_streams[stream_id]) > 4096:
+                            # 調試輸出
+                            if 'POST' in full_data:
+                                print(f"[DEBUG] 檢測到POST請求 (長度: {len(full_data)})")
+                                if 'password' in full_data.lower() or 'login' in full_data.lower():
+                                    print(f"[DEBUG] POST請求包含登入相關欄位")
+                            
+                            # 檢測HTTP POST請求中的密碼
+                            if 'POST' in full_data and ('password' in full_data.lower() or 'passwd' in full_data.lower() or 'login' in full_data.lower()):
+                                print(f"[+] 嘗試提取HTTP憑證...")
+                                self._extract_http_credentials(full_data, packet)
+                            
+                            # 檢測FTP密碼
+                            if ('USER' in full_data or 'PASS' in full_data) and ('220' in full_data or '331' in full_data or '230' in full_data):
+                                print(f"[+] 嘗試提取FTP憑證...")
+                                self._extract_ftp_credentials(full_data, packet)
+                            
+                            # 檢測其他協定的憑證
+                            self._extract_generic_credentials(full_data, packet)
+                            
+                            # 清理已處理的流
+                            if len(tcp_streams) > 100:
+                                oldest = min(tcp_streams.keys(), key=lambda k: len(tcp_streams[k]))
+                                del tcp_streams[oldest]
                     except:
                         # 如果解碼失敗，嘗試直接處理單個資料包
                         try:

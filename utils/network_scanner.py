@@ -4,14 +4,24 @@
 用于扫描局域网中的设备
 """
 
-import nmap
 import socket
 from scapy.all import ARP, Ether, srp
 import ipaddress
 
+try:
+    import nmap
+    NMAP_AVAILABLE = True
+except ImportError:
+    NMAP_AVAILABLE = False
+    print("警告: nmap 模組未安裝，某些掃描功能可能受限")
+    print("請安裝: pip3 install python-nmap --break-system-packages")
+
 class NetworkScanner:
     def __init__(self):
-        self.nm = nmap.PortScanner()
+        if NMAP_AVAILABLE:
+            self.nm = nmap.PortScanner()
+        else:
+            self.nm = None
     
     def scan_network(self, network_range):
         """
@@ -23,6 +33,10 @@ class NetworkScanner:
         Returns:
             list: 活动主机列表
         """
+        if not NMAP_AVAILABLE or self.nm is None:
+            # 如果nmap不可用，使用scapy进行ARP扫描
+            return self._scan_with_scapy(network_range)
+        
         try:
             # 使用nmap扫描
             self.nm.scan(hosts=network_range, arguments='-sn')
@@ -33,6 +47,39 @@ class NetworkScanner:
                 mac = self._get_mac(host)
                 hosts.append({
                     'ip': host,
+                    'hostname': hostname,
+                    'mac': mac,
+                    'status': 'up'
+                })
+            
+            return hosts
+        except Exception as e:
+            print(f"扫描错误: {e}")
+            # 如果nmap扫描失败，回退到scapy
+            return self._scan_with_scapy(network_range)
+    
+    def _scan_with_scapy(self, network_range):
+        """使用scapy进行网络扫描（nmap不可用时的备用方案）"""
+        try:
+            network = ipaddress.ip_network(network_range, strict=False)
+            hosts = []
+            
+            # 使用ARP请求扫描
+            arp_request = ARP(pdst=str(network_range))
+            broadcast = Ether(dst="ff:ff:ff:ff:ff:ff")
+            arp_request_broadcast = broadcast / arp_request
+            answered_list = srp(arp_request_broadcast, timeout=2, verbose=False)[0]
+            
+            for element in answered_list:
+                ip = element[1].psrc
+                mac = element[1].hwsrc
+                try:
+                    hostname = socket.gethostbyaddr(ip)[0]
+                except:
+                    hostname = 'Unknown'
+                
+                hosts.append({
+                    'ip': ip,
                     'hostname': hostname,
                     'mac': mac,
                     'status': 'up'

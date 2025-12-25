@@ -36,6 +36,11 @@ echo ""
 echo "[*] 安装Python开发包和编译工具..."
 sudo apt install -y python3-dev build-essential libssl-dev libffi-dev
 
+# 安装tkinter（GUI界面需要）
+echo ""
+echo "[*] 安装tkinter..."
+sudo apt install -y python3-tk
+
 # 安装netfilterqueue依赖
 echo ""
 echo "[*] 安装netfilterqueue依赖..."
@@ -56,7 +61,7 @@ fi
 # 安装Python依赖
 echo ""
 echo "[*] 安装Python依赖..."
-pip3 install -r requirements.txt
+pip3 install -r requirements.txt --break-system-packages
 
 # 配置IP转发
 echo ""

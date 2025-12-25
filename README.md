@@ -131,6 +131,9 @@ sudo apt update
 # 安裝Python開發套件和編譯工具
 sudo apt install python3 python3-pip python3-dev
 
+# 安裝tkinter所需的系統套件（GUI介面需要）
+sudo apt install python3-tk
+
 # 安裝netfilterqueue所需的系統函式庫
 sudo apt install libnetfilter-queue-dev
 
@@ -145,7 +148,7 @@ sudo apt install build-essential libssl-dev libffi-dev
 
 ```bash
 # 安裝專案依賴
-pip3 install -r requirements.txt
+pip3 install -r requirements.txt --break-system-packages
 ```
 
 ### 4. 安裝系統工具
@@ -439,13 +442,39 @@ sudo python3 main.py
 ```bash
 # 安裝所有必需的系統依賴
 sudo apt update
-sudo apt install python3-dev libnetfilter-queue-dev libpcap-dev build-essential libssl-dev libffi-dev
+sudo apt install python3-dev python3-tk libnetfilter-queue-dev libpcap-dev build-essential libssl-dev libffi-dev
 
 # 然後重新安裝 Python 依賴
-pip3 install -r requirements.txt
+pip3 install -r requirements.txt --break-system-packages
 ```
 
-#### 3. netfilterqueue安裝失敗
+#### 3. tkinter 安裝錯誤
+
+**問題**：`ERROR: Could not find a version that satisfies the requirement tkinter`
+
+**解決方案**：
+```bash
+# tkinter 不是 pip 套件，需要透過系統套件管理器安裝
+sudo apt install python3-tk
+
+# 如果 requirements.txt 中有 tkinter，請移除它（tkinter 是 Python 標準函式庫的一部分）
+```
+
+#### 4. pcapy 版本錯誤
+
+**問題**：`ERROR: Could not find a version that satisfies the requirement pcapy>=0.11.5`
+
+**解決方案**：
+```bash
+# pcapy 的最高可用版本是 0.11.4，已更新 requirements.txt
+# 如果仍有問題，可以手動安裝：
+pip3 install pcapy==0.11.4 --break-system-packages
+
+# 或者使用系統套件（如果可用）
+sudo apt install python3-pcapy
+```
+
+#### 5. netfilterqueue安裝失敗
 
 **問題**：無法安裝netfilterqueue
 
@@ -453,10 +482,10 @@ pip3 install -r requirements.txt
 ```bash
 sudo apt update
 sudo apt install python3-dev libnetfilter-queue-dev
-pip3 install netfilterqueue
+pip3 install netfilterqueue --break-system-packages
 ```
 
-#### 4. IP轉發未啟用
+#### 6. IP轉發未啟用
 
 **問題**：資料包無法轉發
 
@@ -465,7 +494,7 @@ pip3 install netfilterqueue
 sudo sysctl -w net.ipv4.ip_forward=1
 ```
 
-#### 5. iptables規則衝突
+#### 7. iptables規則衝突
 
 **問題**：iptables規則衝突或無法刪除
 
@@ -480,7 +509,7 @@ sudo iptables -X
 sudo iptables -t nat -F
 ```
 
-#### 6. 網路介面未找到
+#### 8. 網路介面未找到
 
 **問題**：無法找到網路介面
 
@@ -494,14 +523,29 @@ ifconfig
 # 在程式碼中指定正確的介面名稱
 ```
 
-#### 7. 依賴套件缺失
+#### 9. nmap 模組未找到
+
+**問題**：`ImportError: No module named 'nmap'`
+
+**解決方案**：
+```bash
+# 安裝 python-nmap 套件
+pip3 install python-nmap --break-system-packages
+
+# 或重新安裝所有依賴
+pip3 install -r requirements.txt --break-system-packages
+```
+
+**注意**：如果 `python-nmap` 無法安裝，程式會自動使用 `scapy` 進行網路掃描，功能可能略有差異。
+
+#### 10. 依賴套件缺失
 
 **問題**：匯入錯誤或模組未找到
 
 **解決方案**：
 ```bash
 # 重新安裝所有依賴
-pip3 install -r requirements.txt --upgrade
+pip3 install -r requirements.txt --upgrade --break-system-packages
 ```
 
 ---

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-資料包分析工具模組
-用於分析網路資料包，檢測異常流量
+Packet Analyzer Tool Module
+Used to analyze network packets and detect abnormal traffic
 """
 
 from scapy.all import sniff, IP, TCP, UDP, DNS, Raw, ARP
@@ -15,57 +15,57 @@ class PacketAnalyzer:
     
     def start_capture(self, interface=None, count=0, filter_str=""):
         """
-        開始捕獲資料包
+        Start capturing packets
         
         Args:
-            interface: 網路介面
-            count: 捕獲數量（0表示無限）
-            filter_str: BPF過濾器
+            interface: Network interface
+            count: Number of packets to capture (0 means unlimited)
+            filter_str: BPF filter
         """
         try:
             sniff(iface=interface, prn=self._process_packet, 
                   count=count, filter=filter_str, store=True)
         except Exception as e:
-            print(f"捕獲資料包錯誤: {e}")
+            print(f"Error capturing packets: {e}")
     
     def _process_packet(self, packet):
-        """處理捕獲的資料包"""
+        """Process captured packet"""
         self.packets.append(packet)
         
-        # 檢測可疑活動
+        # Detect suspicious activities
         self._detect_suspicious_activity(packet)
     
     def _detect_suspicious_activity(self, packet):
-        """檢測可疑的網路活動"""
+        """Detect suspicious network activities"""
         if packet.haslayer(ARP):
-            # 檢測ARP欺騙
+            # Detect ARP spoofing
             if packet[ARP].op == 2:  # ARP reply
-                # 檢查是否有多個IP映射到不同MAC
+                # Check if multiple IPs map to different MACs
                 pass
         
         if packet.haslayer(DNS):
-            # 檢測DNS欺騙
+            # Detect DNS spoofing
             if packet[DNS].qr == 1:  # DNS response
-                # 檢查DNS回應是否可疑
+                # Check if DNS response is suspicious
                 pass
         
         if packet.haslayer(TCP):
-            # 檢測SSL/TLS握手異常
+            # Detect SSL/TLS handshake anomalies
             if packet[TCP].dport == 443 or packet[TCP].sport == 443:
-                # 分析SSL/TLS流量
+                # Analyze SSL/TLS traffic
                 pass
     
     def analyze_ssl_handshake(self, packets):
-        """分析SSL握手協定"""
+        """Analyze SSL handshake protocol"""
         ssl_handshakes = []
         
         for packet in packets:
             if packet.haslayer(TCP) and (packet[TCP].dport == 443 or packet[TCP].sport == 443):
                 if packet.haslayer(Raw):
                     payload = packet[Raw].load
-                    # 檢查SSL/TLS握手訊息
+                    # Check SSL/TLS handshake message
                     if len(payload) > 0:
-                        # SSL/TLS記錄類型
+                        # SSL/TLS record type
                         if payload[0] == 0x16:  # Handshake
                             ssl_handshakes.append({
                                 'src': packet[IP].src,
@@ -77,7 +77,7 @@ class PacketAnalyzer:
         return ssl_handshakes
     
     def detect_arp_spoofing(self, packets):
-        """檢測ARP欺騙攻擊"""
+        """Detect ARP spoofing attacks"""
         arp_table = {}
         spoofing_detected = []
         
@@ -100,7 +100,7 @@ class PacketAnalyzer:
         return spoofing_detected
     
     def detect_dns_spoofing(self, packets):
-        """檢測DNS欺騙攻擊"""
+        """Detect DNS spoofing attacks"""
         dns_responses = {}
         spoofing_detected = []
         

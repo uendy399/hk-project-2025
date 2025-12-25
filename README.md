@@ -6,11 +6,12 @@
 
 ### 主要目的
 
-1. **攻擊演示**：實現ARP欺騙、DNS欺騙、SSL剝離等中間人攻擊技術
+1. **攻擊演示**：實現ARP欺騙、DNS欺騙等中間人攻擊技術
 2. **密碼捕獲**：捕獲網路中的明文密碼和雜湊值
 3. **密碼破解**：使用hashcat和John the Ripper進行密碼破解
-4. **攻擊檢測**：即時檢測網路中的異常活動和攻擊行為
-5. **防禦對策**：提供針對各種攻擊的防禦建議和措施
+4. **流量分析**：動態/靜態分析網路流量，統計DLP和L7協議資訊
+5. **攻擊檢測**：即時檢測網路中的異常活動和攻擊行為
+6. **防禦對策**：提供針對各種攻擊的防禦建議和措施
 
 ### 適用場景
 
@@ -35,20 +36,46 @@
    - 支援多網域名稱同時欺騙
    - 使用netfilterqueue進行資料包攔截和修改
 
-3. **SSL剝離（SSL Stripping）**
-   - 將HTTPS連線降級為HTTP
-   - 捕獲明文傳輸的密碼和敏感資訊
-   - 即時提取HTTP POST請求中的憑證
+3. **ML/DL流量分析（ML/DL Traffic Analysis）**
+   - 使用機器學習和深度學習進行流量分析
+   - 異常檢測（Isolation Forest）
+   - 流量分類（Random Forest）
+   - 時間序列異常檢測（LSTM）
+   - 靜態和動態分析整合
 
-4. **密碼捕獲（Password Capture）**
-   - 捕獲HTTP、FTP等協定的明文密碼
-   - 支援多種密碼格式識別
-   - 即時顯示捕獲的憑證
+### 流量分析模組
 
-5. **密碼破解（Password Cracking）**
-   - 整合hashcat和John the Ripper
-   - 支援多種雜湊演算法（MD5、SHA1、SHA256等）
-   - 使用字典攻擊破解密碼雜湊
+1. **動態流量分析（Dynamic Traffic Analysis）**
+   - 即時捕獲和分析網路流量
+   - 統計數據包數量和流量大小
+   - 計算流量速率（包/秒、字節/秒）
+   - 識別Top Talkers（流量最大的主機）
+
+2. **L7應用層協議分析**
+   - HTTP/HTTPS協議統計
+   - DNS查詢和回應分析
+   - FTP、SMTP、POP3、IMAP等協議識別
+   - 資料庫連接（MySQL、PostgreSQL、MongoDB等）檢測
+   - 遠程桌面（RDP、VNC）協議識別
+   - 協議分佈統計和可視化
+
+3. **DLP數據洩漏防護分析**
+   - 敏感數據檢測（信用卡號、SSN、電子郵件等）
+   - 密碼欄位識別
+   - API密鑰檢測（AWS、OpenAI等）
+   - 文件傳輸檢測（PDF、DOC、ZIP等）
+   - IP地址洩漏檢測
+   - 即時DLP事件記錄和告警
+
+4. **靜態數據包分析**
+   - 分析已捕獲的數據包文件
+   - 離線流量統計
+   - 歷史數據分析
+
+5. **統計數據導出**
+   - 支援JSON格式導出
+   - 包含完整的分析統計數據
+   - 時間戳和詳細事件記錄
 
 ### 防禦工具模組
 
@@ -75,7 +102,6 @@
 
 2. **資料包分析（Packet Analyzer）**
    - 捕獲和分析網路資料包
-   - SSL/TLS握手協定分析
    - 異常流量檢測
 
 ### 圖形使用者介面
@@ -84,7 +110,10 @@
 - 即時日誌顯示
 - 攻擊結果視覺化
 - 一鍵啟動/停止攻擊
-- 防禦報告產生
+- 流量分析統計視圖
+- DLP事件實時監控
+- L7協議統計圖表
+- 統計數據導出功能
 
 ---
 
@@ -227,26 +256,47 @@ python3 main.py
    - 重新導向IP：要重新導向到的IP位址
 2. 點擊「開始DNS欺騙」
 
-#### 4. 執行SSL剝離
+#### 4. 流量分析
 
-1. 點擊「開始SSL剝離」
-2. 系統將嘗試將HTTPS連線降級為HTTP
-3. 捕獲的憑證將顯示在「捕獲的憑證」區域
+1. 開啟「流量分析」標籤頁
+2. 選擇網路介面（可選）
+3. 設定BPF過濾器（可選，如：`tcp port 80`）
+4. 點擊「開始分析」
+5. 查看各標籤頁的統計數據：
+   - **總覽**：基本統計、協議分佈、Top Talkers
+   - **L7協議統計**：應用層協議分佈
+   - **DLP事件**：敏感數據檢測結果
+   - **HTTP請求**：HTTP請求詳情
+   - **DNS查詢**：DNS查詢和回應
+   - **ML/DL分析**：機器學習和深度學習分析結果
+6. 點擊「導出統計」保存分析結果
 
-#### 5. 密碼捕獲
+#### 5. ML/DL分析
 
-1. 點擊「開始密碼捕獲」
-2. 系統將監控網路流量並提取密碼
-3. 捕獲的密碼將即時顯示
+1. 在「流量分析」標籤頁中，開啟「ML/DL分析」子標籤
+2. 查看ML/DL分析結果：
+   - **總覽**：ML/DL分析統計、模型狀態
+   - **異常檢測**：使用Isolation Forest和LSTM檢測的異常
+   - **流量分類**：使用Random Forest分類的流量類型
+   - **模型訓練**：訓練和構建ML/DL模型
+3. 可以訓練Isolation Forest模型進行異常檢測
+4. 可以構建LSTM模型進行時間序列分析
 
-#### 6. 攻擊檢測
+#### 6. ML/DL模型訓練
+
+1. 在「ML/DL分析」標籤頁中，開啟「模型訓練」子標籤
+2. 點擊「Train Isolation Forest」訓練異常檢測模型
+3. 點擊「Build LSTM Model」構建LSTM模型
+4. 查看訓練日誌和模型狀態
+
+#### 7. 攻擊檢測
 
 1. 開啟「防禦工具」標籤頁
 2. 點擊「開始檢測」
 3. 系統將即時監控並檢測攻擊
 4. 點擊「產生報告」查看詳細報告
 
-#### 7. 應用防禦對策
+#### 8. 應用防禦對策
 
 1. 在「防禦工具」標籤頁
 2. 點擊「應用防禦對策」
@@ -259,9 +309,9 @@ python3 main.py
 ### 推薦實驗拓撲
 
 ```
-[攻擊者] ---- [交換器] ---- [閘道] ---- [網際網路]
+[Attacker] ---- [Switch] ---- [Gateway] ---- [Internet]
               |         |
-         [受害者1]  [受害者2]
+         [Victim1]  [Victim2]
 ```
 
 ### 實驗步驟
@@ -299,37 +349,43 @@ python3 main.py
    - 檢查DNS快取中的記錄
    - 驗證網域名稱解析結果
 
-#### 實驗3：SSL剝離攻擊
+#### 實驗3：流量分析
 
 1. **準備環境**
-   - 啟動ARP欺騙和SSL剝離
-   - 受害者裝置嘗試存取HTTPS網站
+   - 啟動流量分析
+   - 產生網路流量（瀏覽網頁、發送郵件等）
 
-2. **執行攻擊**
-   - 受害者存取HTTPS網站
-   - 系統嘗試將連線降級為HTTP
-   - 捕獲明文傳輸的密碼
-
-3. **分析結果**
-   - 檢查捕獲的憑證
-   - 使用Wireshark分析SSL/TLS握手
-   - 驗證HTTPS到HTTP的降級
-
-#### 實驗4：密碼破解
-
-1. **準備雜湊值**
-   - 從捕獲的資料中提取密碼雜湊
-   - 或使用已知的測試雜湊
-
-2. **執行破解**
-   - 使用hashcat或John the Ripper
-   - 選擇合適的字典檔案
-   - 等待破解結果
+2. **執行分析**
+   - 觀察即時統計數據
+   - 查看L7協議分佈
+   - 監控DLP事件
 
 3. **分析結果**
-   - 比較破解時間
-   - 分析密碼強度
-   - 評估字典攻擊效果
+   - 檢查協議統計
+   - 查看DLP檢測結果
+   - 分析HTTP請求和DNS查詢
+   - 導出統計報告
+
+#### 實驗4：ML/DL流量分析
+
+1. **準備環境**
+   - 啟動流量分析
+   - 確保ML/DL分析已啟用
+
+2. **執行分析**
+   - 產生網路流量
+   - 觀察ML/DL分析結果
+   - 查看異常檢測和流量分類
+
+3. **訓練模型**
+   - 收集足夠的流量數據
+   - 訓練Isolation Forest模型
+   - 構建LSTM模型
+
+4. **分析結果**
+   - 檢查異常檢測準確率
+   - 評估流量分類效果
+   - 分析模型性能
 
 #### 實驗5：攻擊檢測
 
@@ -368,24 +424,48 @@ DNS欺騙透過偽造DNS回應包，將網域名稱解析到攻擊者指定的IP
 - 使用可信的DNS伺服器
 - 驗證DNS回應的一致性
 
-### SSL剝離原理
+### 流量分析原理
 
-SSL剝離攻擊利用使用者可能透過HTTP存取HTTPS網站的行為，在中間人位置將HTTPS連線降級為HTTP，從而可以捕獲明文資料。
+流量分析通過捕獲網路數據包，對應用層（L7）協議進行識別和統計，同時檢測敏感數據洩漏（DLP）。
+
+**L7協議識別**：
+- 通過端口號識別常見協議（HTTP:80, HTTPS:443, DNS:53等）
+- 解析協議頭部識別應用層協議
+- 統計協議分佈和流量大小
+
+**DLP檢測**：
+- 使用正則表達式匹配敏感數據模式
+- 檢測信用卡號、SSN、電子郵件等
+- 識別密碼欄位和API密鑰
+- 檢測文件傳輸和數據洩漏
 
 **防禦方法**：
-- 使用HSTS（HTTP Strict Transport Security）
-- 瀏覽器擴充功能（如HTTPS Everywhere）
-- 憑證固定（Certificate Pinning）
+- 使用加密通訊（HTTPS、VPN）
+- 實施數據分類和標記
+- 使用DLP解決方案
+- 監控異常流量模式
 
-### 密碼破解原理
+### ML/DL分析原理
 
-密碼破解通常使用字典攻擊或暴力破解。字典攻擊使用常見密碼清單，暴力破解嘗試所有可能的組合。
+ML/DL分析使用機器學習和深度學習技術來分析網路流量，包括：
+
+**異常檢測**：
+- Isolation Forest：無監督學習方法，用於檢測異常流量模式
+- LSTM：深度學習模型，用於時間序列異常檢測
+
+**流量分類**：
+- Random Forest：監督學習方法，用於分類不同類型的網路流量
+
+**特徵提取**：
+- 從數據包中提取多維特徵（大小、端口、協議、時間等）
+- 統計特徵（均值、標準差、趨勢等）
+- 流特徵（持續時間、數據量等）
 
 **防禦方法**：
-- 使用強密碼
-- 啟用多因素認證
-- 使用密碼雜湊加鹽
-- 限制登入嘗試次數
+- 使用加密通訊
+- 實施流量監控
+- 部署入侵檢測系統
+- 使用ML/DL進行異常檢測
 
 ---
 
@@ -567,12 +647,13 @@ pip3 install -r requirements.txt --upgrade --break-system-packages
 3. 檢查DNS回應的IP位址
 4. 驗證網域名稱解析的正確性
 
-### 分析SSL/TLS握手
+### 分析流量統計
 
-1. 使用過濾器：`tcp.port == 443`
-2. 查找Client Hello和Server Hello
-3. 分析憑證交換過程
-4. 檢查是否有異常或降級
+1. 使用過濾器：`tcp` 或 `udp`
+2. 查看協議分佈
+3. 分析HTTP請求和回應
+4. 檢查DNS查詢和回應
+5. 監控敏感數據傳輸
 
 ---
 
@@ -609,30 +690,30 @@ pip3 install -r requirements.txt --upgrade --break-system-packages
 
 ```
 HK_Project/
-├── main.py                 # 主程式入口
-├── requirements.txt        # Python依賴
-├── README.md              # 專案文件
+├── main.py                 # Main program entry
+├── requirements.txt        # Python dependencies
+├── README.md              # Project documentation
 │
-├── attacks/               # 攻擊模組
+├── attacks/               # Attack modules
 │   ├── __init__.py
-│   ├── arp_spoof.py       # ARP欺騙
-│   ├── dns_spoof.py       # DNS欺騙
-│   ├── ssl_strip.py       # SSL剝離
-│   └── password_capture.py # 密碼捕獲
+│   ├── arp_spoof.py       # ARP spoofing
+│   └── dns_spoof.py       # DNS spoofing
 │
-├── defense/               # 防禦模組
+├── defense/               # Defense modules
 │   ├── __init__.py
-│   ├── attack_detector.py # 攻擊檢測
-│   └── countermeasures.py # 防禦對策
+│   ├── attack_detector.py # Attack detection
+│   └── countermeasures.py # Countermeasures
 │
-├── utils/                 # 工具模組
+├── utils/                 # Utility modules
 │   ├── __init__.py
-│   ├── network_scanner.py # 網路掃描
-│   └── packet_analyzer.py # 資料包分析
+│   ├── network_scanner.py # Network scanner
+│   ├── packet_analyzer.py # Packet analyzer
+│   ├── traffic_analyzer.py # Traffic analyzer (DLP/L7)
+│   └── ml_analyzer.py      # ML/DL analyzer (static/dynamic)
 │
-└── gui/                   # 圖形介面
+└── gui/                   # Graphical interface
     ├── __init__.py
-    └── main_window.py     # 主視窗
+    └── main_window.py     # Main window
 ```
 
 ---
@@ -662,9 +743,26 @@ HK_Project/
 
 ## 🔄 更新日誌
 
+### v2.1.0 (2024)
+- 移除密碼捕獲和破解功能
+- 整合ML/DL靜態和動態分析
+- 新增Isolation Forest異常檢測
+- 新增Random Forest流量分類
+- 新增LSTM時間序列異常檢測
+- 新增ML/DL分析GUI標籤頁
+- 支援模型訓練和導出
+
+### v2.0.0 (2024)
+- 移除SSL解密和中間人功能
+- 新增動態/靜態流量分析功能
+- 實現DLP（數據洩漏防護）檢測
+- 實現L7（應用層）協議統計
+- 新增流量分析GUI標籤頁
+- 支援統計數據導出
+
 ### v1.0.0 (2024)
 - 初始版本發布
-- 實現ARP欺騙、DNS欺騙、SSL剝離
+- 實現ARP欺騙、DNS欺騙
 - 實現密碼捕獲和破解
 - 實現攻擊檢測和防禦
 - 圖形使用者介面

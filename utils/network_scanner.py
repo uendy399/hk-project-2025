@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-網路掃描工具模組
-用於掃描區域網路中的裝置
+Network Scanner Tool Module
+Used to scan devices in local network
 """
 
 import socket
@@ -13,8 +13,8 @@ try:
     NMAP_AVAILABLE = True
 except ImportError:
     NMAP_AVAILABLE = False
-    print("警告: nmap 模組未安裝，某些掃描功能可能受限")
-    print("請安裝: pip3 install python-nmap --break-system-packages")
+    print("Warning: nmap module not installed, some scanning features may be limited")
+    print("Please install: pip3 install python-nmap --break-system-packages")
 
 class NetworkScanner:
     def __init__(self):
@@ -25,20 +25,20 @@ class NetworkScanner:
     
     def scan_network(self, network_range):
         """
-        掃描指定網路範圍內的活動主機
+        Scan for active hosts in specified network range
         
         Args:
-            network_range: 網路範圍，例如 '192.168.1.0/24'
+            network_range: Network range, e.g. '192.168.1.0/24'
         
         Returns:
-            list: 活動主機列表
+            list: List of active hosts
         """
         if not NMAP_AVAILABLE or self.nm is None:
-            # 如果nmap不可用，使用scapy進行ARP掃描
+            # If nmap unavailable, use scapy for ARP scanning
             return self._scan_with_scapy(network_range)
         
         try:
-            # 使用nmap掃描
+            # Use nmap to scan
             self.nm.scan(hosts=network_range, arguments='-sn')
             hosts = []
             
@@ -54,17 +54,17 @@ class NetworkScanner:
             
             return hosts
         except Exception as e:
-            print(f"掃描錯誤: {e}")
-            # 如果nmap掃描失敗，回退到scapy
+            print(f"Scan error: {e}")
+            # If nmap scan fails, fall back to scapy
             return self._scan_with_scapy(network_range)
     
     def _scan_with_scapy(self, network_range):
-        """使用scapy進行網路掃描（nmap不可用時的備用方案）"""
+        """Use scapy for network scanning (fallback when nmap unavailable)"""
         try:
             network = ipaddress.ip_network(network_range, strict=False)
             hosts = []
             
-            # 使用ARP請求掃描
+            # Use ARP requests to scan
             arp_request = ARP(pdst=str(network_range))
             broadcast = Ether(dst="ff:ff:ff:ff:ff:ff")
             arp_request_broadcast = broadcast / arp_request
@@ -87,11 +87,11 @@ class NetworkScanner:
             
             return hosts
         except Exception as e:
-            print(f"掃描錯誤: {e}")
+            print(f"Scan error: {e}")
             return []
     
     def _get_mac(self, ip):
-        """獲取IP位址對應的MAC位址"""
+        """Get MAC address corresponding to IP address"""
         try:
             arp_request = ARP(pdst=ip)
             broadcast = Ether(dst="ff:ff:ff:ff:ff:ff")
@@ -105,9 +105,9 @@ class NetworkScanner:
             return "Unknown"
     
     def get_gateway(self):
-        """獲取預設閘道"""
+        """Get default gateway"""
         try:
-            # 讀取路由表獲取閘道
+            # Read routing table to get gateway
             import subprocess
             result = subprocess.run(['ip', 'route', 'show', 'default'], 
                                   capture_output=True, text=True)
@@ -118,7 +118,7 @@ class NetworkScanner:
                     gateway_mac = self._get_mac(gateway_ip)
                     return {'ip': gateway_ip, 'mac': gateway_mac}
         except Exception as e:
-            print(f"獲取閘道錯誤: {e}")
+            print(f"Error getting gateway: {e}")
         return None
 
 

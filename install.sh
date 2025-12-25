@@ -31,10 +31,20 @@ echo ""
 echo "[*] 安装系统依赖..."
 sudo apt install -y python3 python3-pip nmap wireshark
 
+# 安装Python开发包和编译工具
+echo ""
+echo "[*] 安装Python开发包和编译工具..."
+sudo apt install -y python3-dev build-essential libssl-dev libffi-dev
+
 # 安装netfilterqueue依赖
 echo ""
 echo "[*] 安装netfilterqueue依赖..."
-sudo apt install -y python3-dev libnetfilter-queue-dev
+sudo apt install -y libnetfilter-queue-dev
+
+# 安装pcapy依赖
+echo ""
+echo "[*] 安装pcapy依赖..."
+sudo apt install -y libpcap-dev
 
 # 安装密码破解工具（可选）
 echo ""
@@ -70,4 +80,5 @@ echo "  sudo python3 main.py"
 echo ""
 echo "注意: 某些功能需要root权限"
 echo ""
+
 

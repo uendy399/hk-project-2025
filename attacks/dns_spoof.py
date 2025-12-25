@@ -109,3 +109,4 @@ class DNSSpoofer:
             print(f"停止DNS欺骗错误: {e}")
             return False
 
+

@@ -350,21 +350,25 @@ class MainWindow:
     
     def _show_ca_cert(self):
         """顯示CA證書資訊"""
-        if not self.ssl_mitm:
-            self.ssl_mitm = SSLMitm()
+        # 檢查CA證書文件是否存在
+        cert_path = "ca_cert.pem"
         
-        cert_path = self.ssl_mitm.get_ca_cert_path()
         if os.path.exists(cert_path):
-            message = f"CA證書位置: {cert_path}\\n\\n"
+            abs_path = os.path.abspath(cert_path)
+            message = f"CA證書位置: {abs_path}\\n\\n"
             message += "要安裝CA證書到目標系統:\\n"
             message += "1. 將證書複製到目標系統\\n"
             message += "2. 在Linux上: sudo cp ca_cert.pem /usr/local/share/ca-certificates/mitm-ca.crt\\n"
             message += "   sudo update-ca-certificates\\n"
             message += "3. 在Windows上: 雙擊證書文件，選擇'安裝證書'，選擇'受信任的根證書頒發機構'\\n"
-            message += "4. 在macOS上: 雙擊證書文件，在鑰匙串中標記為'始終信任'"
+            message += "4. 在macOS上: 雙擊證書文件，在鑰匙串中標記為'始終信任'\\n"
+            message += "5. 在Android上: 設置 > 安全性 > 加密與憑證 > 從存儲設備安裝"
             messagebox.showinfo("CA證書資訊", message)
         else:
-            messagebox.showinfo("CA證書", "CA證書尚未創建，請先啟動SSL中間人功能")
+            message = "CA證書尚未創建。\\n\\n"
+            message += "要創建CA證書，請先啟動SSL中間人功能。\\n"
+            message += "CA證書將自動創建並保存在當前目錄的 ca_cert.pem 文件中。"
+            messagebox.showinfo("CA證書", message)
     
 def main():
     root = tk.Tk()

@@ -89,10 +89,15 @@ class SSLMitm:
             critical=True,
         ).add_extension(
             x509.KeyUsage(
-                key_encipherment=True,
                 digital_signature=True,
+                content_commitment=False,
+                key_encipherment=True,
+                data_encipherment=False,
+                key_agreement=False,
                 key_cert_sign=True,
                 crl_sign=True,
+                encipher_only=False,
+                decipher_only=False,
             ),
             critical=True,
         ).sign(private_key, hashes.SHA256())

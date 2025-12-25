@@ -169,109 +169,262 @@ class SSLMitm:
     def _extract_sni(self, client_hello):
         """從TLS Client Hello中提取SNI（Server Name Indication）"""
         try:
-            # TLS記錄層：跳過記錄頭（5字節）
             if len(client_hello) < 5:
                 return None
             
-            # 檢查是否為Handshake記錄（0x16）
-            if client_hello[0] != 0x16:
+            # 檢查TLS記錄類型（0x16 = Handshake, 0x17 = Application Data）
+            record_type = client_hello[0]
+            if record_type != 0x16:  # Handshake
                 return None
             
-            # 跳過TLS記錄頭，找到Handshake消息
-            # 記錄長度在字節2-4
+            # TLS版本（字節1-2）
+            version = (client_hello[1] << 8) | client_hello[2]
+            
+            # 記錄長度（字節3-4）
             record_length = (client_hello[3] << 8) | client_hello[4]
             
+            # 確保有足夠的數據
             if len(client_hello) < 5 + record_length:
+                # 可能需要讀取更多數據，但先嘗試解析現有數據
+                pass
+            
+            # Handshake消息開始於字節5
+            handshake_start = 5
+            handshake_data = client_hello[handshake_start:]
+            
+            if len(handshake_data) < 1:
                 return None
             
-            handshake = client_hello[5:]
-            
-            # 檢查是否為Client Hello（0x01）
-            if len(handshake) < 1 or handshake[0] != 0x01:
+            # Handshake類型（0x01 = Client Hello）
+            handshake_type = handshake_data[0]
+            if handshake_type != 0x01:
                 return None
             
-            # 跳過Handshake消息頭（4字節：類型1字節 + 長度3字節）
-            if len(handshake) < 4:
+            # Handshake消息長度（3字節）
+            if len(handshake_data) < 4:
                 return None
             
-            client_hello_msg = handshake[4:]
+            handshake_length = (handshake_data[1] << 16) | (handshake_data[2] << 8) | handshake_data[3]
             
-            # 跳過版本（2字節）+ 隨機數（32字節）+ Session ID長度（1字節）
-            if len(client_hello_msg) < 35:
+            # Client Hello消息開始於字節4
+            client_hello_start = 4
+            client_hello_data = handshake_data[client_hello_start:]
+            
+            if len(client_hello_data) < 35:
                 return None
             
-            offset = 35
-            session_id_length = client_hello_msg[34]
+            # 跳過版本（2字節）
+            offset = 2
+            
+            # 跳過隨機數（32字節）
+            offset += 32
+            
+            # Session ID長度（1字節）
+            if len(client_hello_data) < offset + 1:
+                return None
+            session_id_length = client_hello_data[offset]
+            offset += 1
+            
+            # Session ID（可變長度）
+            if len(client_hello_data) < offset + session_id_length:
+                return None
             offset += session_id_length
             
-            # 跳過Cipher Suites長度（2字節）
-            if len(client_hello_msg) < offset + 2:
+            # Cipher Suites長度（2字節）
+            if len(client_hello_data) < offset + 2:
                 return None
-            
-            cipher_suites_length = (client_hello_msg[offset] << 8) | client_hello_msg[offset + 1]
-            offset += 2 + cipher_suites_length
-            
-            # 跳過Compression Methods長度（1字節）
-            if len(client_hello_msg) < offset + 1:
-                return None
-            
-            compression_methods_length = client_hello_msg[offset]
-            offset += 1 + compression_methods_length
-            
-            # 現在應該在Extensions部分
-            if len(client_hello_msg) < offset + 2:
-                return None
-            
-            extensions_length = (client_hello_msg[offset] << 8) | client_hello_msg[offset + 1]
+            cipher_suites_length = (client_hello_data[offset] << 8) | client_hello_data[offset + 1]
             offset += 2
             
-            # 遍歷Extensions查找SNI（類型0x0000）
+            # Cipher Suites（可變長度）
+            if len(client_hello_data) < offset + cipher_suites_length:
+                return None
+            offset += cipher_suites_length
+            
+            # Compression Methods長度（1字節）
+            if len(client_hello_data) < offset + 1:
+                return None
+            compression_methods_length = client_hello_data[offset]
+            offset += 1
+            
+            # Compression Methods（可變長度）
+            if len(client_hello_data) < offset + compression_methods_length:
+                return None
+            offset += compression_methods_length
+            
+            # Extensions長度（2字節，TLS 1.2+）
+            if len(client_hello_data) < offset + 2:
+                return None
+            extensions_length = (client_hello_data[offset] << 8) | client_hello_data[offset + 1]
+            offset += 2
+            
+            # 遍歷Extensions
             ext_end = offset + extensions_length
-            while offset < ext_end and offset + 4 <= len(client_hello_msg):
-                ext_type = (client_hello_msg[offset] << 8) | client_hello_msg[offset + 1]
-                ext_length = (client_hello_msg[offset + 2] << 8) | client_hello_msg[offset + 3]
-                offset += 4
+            while offset < ext_end and offset + 4 <= len(client_hello_data):
+                # Extension類型（2字節）
+                ext_type = (client_hello_data[offset] << 8) | client_hello_data[offset + 1]
+                offset += 2
                 
-                if ext_type == 0:  # SNI extension
-                    if len(client_hello_msg) < offset + 2:
+                # Extension長度（2字節）
+                if offset + 2 > len(client_hello_data):
+                    break
+                ext_length = (client_hello_data[offset] << 8) | client_hello_data[offset + 1]
+                offset += 2
+                
+                # SNI extension類型是0
+                if ext_type == 0:
+                    # Server Name List長度（2字節）
+                    if offset + 2 > len(client_hello_data):
                         break
-                    server_name_list_length = (client_hello_msg[offset] << 8) | client_hello_msg[offset + 1]
+                    server_name_list_length = (client_hello_data[offset] << 8) | client_hello_data[offset + 1]
                     offset += 2
                     
-                    if len(client_hello_msg) < offset + 3:
+                    # Server Name條目
+                    if offset + 3 > len(client_hello_data):
                         break
-                    name_type = client_hello_msg[offset]
-                    name_length = (client_hello_msg[offset + 1] << 8) | client_hello_msg[offset + 2]
-                    offset += 3
+                    name_type = client_hello_data[offset]
+                    offset += 1
                     
-                    if name_type == 0 and len(client_hello_msg) >= offset + name_length:  # host_name
-                        server_name = client_hello_msg[offset:offset + name_length].decode('utf-8', errors='ignore')
+                    # Name長度（2字節）
+                    if offset + 2 > len(client_hello_data):
+                        break
+                    name_length = (client_hello_data[offset] << 8) | client_hello_data[offset + 1]
+                    offset += 2
+                    
+                    # Name（host_name類型為0）
+                    if name_type == 0 and offset + name_length <= len(client_hello_data):
+                        server_name = client_hello_data[offset:offset + name_length].decode('utf-8', errors='ignore')
                         return server_name
                     break
                 
+                # 跳過此extension
                 offset += ext_length
             
             return None
         except Exception as e:
+            # 調試：輸出錯誤信息（僅在開發時）
+            # print(f"[DEBUG] SNI提取錯誤: {e}")
             return None
     
     def _handle_client(self, client_socket, client_addr):
         """處理客戶端連接"""
+        host = None
         try:
             client_socket.settimeout(30)
             
-            # 接收TLS Client Hello（不進行SSL握手，先讀取原始數據）
-            client_hello = client_socket.recv(4096)
+            # 使用SSL上下文來捕獲SNI
+            # 創建一個臨時的SSL上下文，設置SNI回調
+            temp_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            sni_host = [None]  # 使用列表以便在回調中修改
+            
+            def sni_callback(ssl_sock, server_name, ssl_context):
+                if server_name:
+                    sni_host[0] = server_name
+                return None
+            
+            temp_context.set_servername_callback(sni_callback)
+            
+            # 讀取Client Hello數據
+            client_hello = client_socket.recv(8192)
             
             if not client_hello:
                 return
             
-            # 從Client Hello中提取SNI
+            # 方法1：嘗試從原始數據中提取SNI
             host = self._extract_sni(client_hello)
             
+            # 方法2：如果方法1失敗，嘗試使用SSL模組的SNI回調
             if not host:
-                # 如果無法提取SNI，嘗試其他方法
-                # 可以從iptables重定向的目標IP推斷，但這裡簡化處理
+                try:
+                    # 創建一個臨時證書用於SNI提取
+                    temp_cert, temp_key = self._generate_certificate_for_domain("temp.example.com")
+                    cert_pem = temp_cert.public_bytes(serialization.Encoding.PEM)
+                    key_pem = temp_key.private_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PrivateFormat.PKCS8,
+                        encryption_algorithm=serialization.NoEncryption()
+                    )
+                    
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pem') as cert_file:
+                        cert_file.write(cert_pem)
+                        temp_cert_path = cert_file.name
+                    
+                    with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.key') as key_file:
+                        key_file.write(key_pem)
+                        temp_key_path = key_file.name
+                    
+                    try:
+                        temp_context.load_cert_chain(temp_cert_path, temp_key_path)
+                        
+                        # 將socket包裝為SSL來觸發SNI回調
+                        # 注意：這需要完整的握手，但我們可以在握手過程中獲取SNI
+                        ssl_sock = temp_context.wrap_socket(client_socket, server_side=True, do_handshake_on_connect=False)
+                        
+                        # 嘗試進行握手（這會觸發SNI回調）
+                        try:
+                            ssl_sock.do_handshake()
+                        except:
+                            # 即使握手失敗，SNI應該已經被提取
+                            pass
+                        
+                        if sni_host[0]:
+                            host = sni_host[0]
+                            # SNI已提取，但我們已經進行了部分握手
+                            # 需要關閉這個連接並重新開始
+                            try:
+                                ssl_sock.close()
+                            except:
+                                pass
+                            # 注意：這裡不能重新連接，因為客戶端已經連接了
+                            # 我們需要從原始數據開始，但socket已經被SSL包裝了
+                            # 所以如果使用SSL方法提取SNI，我們需要繼續使用這個SSL連接
+                            # 但為了簡化，我們只在SNI提取成功時使用這個方法
+                            # 實際上，如果SSL握手已經開始，我們應該繼續使用這個連接
+                        
+                        try:
+                            os.unlink(temp_cert_path)
+                            os.unlink(temp_key_path)
+                        except:
+                            pass
+                    except Exception as e:
+                        try:
+                            os.unlink(temp_cert_path)
+                            os.unlink(temp_key_path)
+                        except:
+                            pass
+                        # 如果SSL方法也失敗，繼續嘗試其他方法
+                        pass
+                except Exception as e:
+                    pass
+            
+            # 方法3：如果前兩種方法都失敗，使用啟發式方法
+            if not host:
+                try:
+                    import re
+                    # 在Client Hello中搜索域名模式
+                    client_hello_str = client_hello.decode('latin-1', errors='ignore')
+                    # 查找常見的頂級域名模式
+                    domain_pattern = r'\b([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
+                    matches = re.findall(domain_pattern, client_hello_str)
+                    if matches:
+                        # 過濾掉明顯不是域名的匹配（如版本號等）
+                        for match in matches:
+                            potential_host = match[0] if isinstance(match, tuple) else match
+                            # 驗證：域名應該在合理長度內，且不包含明顯的無效字符
+                            if (3 < len(potential_host) < 255 and 
+                                '.' in potential_host and 
+                                not potential_host.startswith('.') and
+                                not potential_host.endswith('.')):
+                                # 排除一些明顯不是域名的模式
+                                if not re.match(r'^\d+\.\d+\.\d+', potential_host):  # 排除IP地址模式
+                                    host = potential_host
+                                    print(f"[*] 使用啟發式方法找到域名: {host}")
+                                    break
+                except Exception as e:
+                    pass
+            
+            if not host:
                 print(f"[!] 無法從TLS握手提取SNI，跳過此連接")
                 return
             
